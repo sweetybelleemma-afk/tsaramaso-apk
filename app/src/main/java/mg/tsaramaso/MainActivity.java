@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        webView.loadUrl("http://127.0.0.1:8080");
+        webView.loadUrl("file:///android_asset/index.html");
     }
 
     @Override
