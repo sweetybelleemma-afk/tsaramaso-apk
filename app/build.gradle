@@ -1,0 +1,15 @@
+apply plugin: 'com.android.application'
+android {
+    compileSdkVersion 33
+    defaultConfig {
+        applicationId "mg.tsaramaso"
+        minSdkVersion 21
+        targetSdkVersion 33
+        versionCode 1
+        versionName "5.0"
+    }
+    buildTypes {
+        release { minifyEnabled false }
+    }
+}
+dependencies {}
