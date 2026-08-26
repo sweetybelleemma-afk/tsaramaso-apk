@@ -3,8 +3,8 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.webkit.*;
 import android.graphics.Color;
-import java.util.Map;
-import java.util.HashMap;
+import android.view.View;
+import android.os.Message;
 
 public class MainActivity extends Activity {
     WebView webView;
@@ -12,6 +12,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        WebView.setWebContentsDebuggingEnabled(true);
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#0b0f19"));
         setContentView(webView);
@@ -19,14 +21,43 @@ public class MainActivity extends Activity {
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
         s.setAllowFileAccess(true);
+        s.setAllowContentAccess(true);
         s.setAllowUniversalAccessFromFileURLs(true);
         s.setAllowFileAccessFromFileURLs(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        s.setSupportMultipleWindows(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        s.setUserAgentString("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                WebView newWebView = new WebView(view.getContext());
+                newWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                        view.loadUrl(r.getUrl().toString());
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(newWebView);
+                resultMsg.sendToTarget();
+                return true;
+            }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                request.grant(request.getResources());
+            }
+        });
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
@@ -34,51 +65,17 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                // Intercepter les requêtes vers bet261 pour supprimer X-Frame-Options
-                String url = request.getUrl().toString();
-                if (url.contains("bet261.mg")) {
-                    try {
-                        java.net.URL u = new java.net.URL(url);
-                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) u.openConnection();
-                        conn.setRequestMethod(request.getMethod());
-                        // Copier les headers de la requête originale
-                        Map<String, String> reqHeaders = request.getRequestHeaders();
-                        for (Map.Entry<String, String> entry : reqHeaders.entrySet()) {
-                            conn.setRequestProperty(entry.getKey(), entry.getValue());
-                        }
-                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
-                        conn.connect();
-
-                        // Filtrer les headers de réponse — supprimer X-Frame-Options
-                        Map<String, String> responseHeaders = new HashMap<>();
-                        Map<String, java.util.List<String>> headerFields = conn.getHeaderFields();
-                        for (Map.Entry<String, java.util.List<String>> entry : headerFields.entrySet()) {
-                            String key = entry.getKey();
-                            if (key == null) continue;
-                            // Supprimer les headers qui bloquent l'iframe
-                            if (key.equalsIgnoreCase("X-Frame-Options")) continue;
-                            if (key.equalsIgnoreCase("Content-Security-Policy")) continue;
-                            responseHeaders.put(key, entry.getValue().get(0));
-                        }
-
-                        String mimeType = conn.getContentType();
-                        if (mimeType == null) mimeType = "text/html";
-                        if (mimeType.contains(";")) mimeType = mimeType.split(";")[0].trim();
-
-                        return new WebResourceResponse(
-                            mimeType,
-                            "utf-8",
-                            conn.getResponseCode(),
-                            conn.getResponseMessage(),
-                            responseHeaders,
-                            conn.getInputStream()
-                        );
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }
-                return null;
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Supprimer X-Frame-Options via JS après chargement
+                view.evaluateJavascript(
+                    "(function() {" +
+                    "  var frames = document.querySelectorAll('iframe');" +
+                    "  frames.forEach(function(f) {" +
+                    "    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation');" +
+                    "  });" +
+                    "})();", null
+                );
             }
         });
 
