@@ -140,3 +140,12 @@ async function resetDonnees() {
   demarrerAntiSleep();
   setInterval(verifierServeur, 30000);
 })();
+
+// Appelé par Java quand scraping détecte un nouveau tour
+function updateFromNative(data) {
+  if (!data || !data.success) return;
+  mettreAJourHistorique(data.multiplicateurs);
+  mettreAJourEtat(data.etat);
+  mettreAJourReco(data.recommandation);
+  vibrer(data.recommandation);
+}
