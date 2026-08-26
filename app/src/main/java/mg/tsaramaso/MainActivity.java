@@ -7,15 +7,14 @@ import android.graphics.Color;
 import android.view.ViewGroup;
 import android.view.Gravity;
 import android.widget.FrameLayout;
-import android.widget.ImageButton;
-import android.graphics.drawable.GradientDrawable;
+import android.widget.Button;
 import android.util.TypedValue;
 
 public class MainActivity extends Activity {
     WebView dashboardView;
     WebView gameView;
     FrameLayout container;
-    android.widget.Button btnRetour;
+    Button btnRetour;
     boolean showingGame = false;
     Handler scrapHandler = new Handler();
     String derniereValeur = "";
@@ -23,31 +22,23 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         container = new FrameLayout(this);
         setContentView(container);
 
-        // ── Dashboard WebView ──────────────────────────
         dashboardView = createWebView();
         dashboardView.loadUrl("file:///android_asset/index.html");
         container.addView(dashboardView, matchParent());
 
-        // ── Game WebView ───────────────────────────────
         gameView = createWebView();
         gameView.loadUrl("https://bet261.mg/instant-games/llc/Aviator");
         gameView.setVisibility(android.view.View.GONE);
         container.addView(gameView, matchParent());
 
-        // ── Bouton retour flottant ─────────────────────
-        btnRetour = new android.widget.Button(this);
-        btnRetour.setText("⬅ Dashboard");
-        btnRetour.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#1e40af"));
-        bg.setCornerRadius(dp(24));
-        btnRetour.setBackground(bg);
+        btnRetour = new Button(this);
+        btnRetour.setText("< Dashboard");
         btnRetour.setTextColor(Color.WHITE);
-        btnRetour.setPadding(dp(16), dp(10), dp(16), dp(10));
+        btnRetour.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        btnRetour.setBackgroundColor(Color.parseColor("#1e40af"));
         btnRetour.setVisibility(android.view.View.GONE);
         btnRetour.setOnClickListener(v -> afficherDashboard());
 
@@ -57,10 +48,9 @@ public class MainActivity extends Activity {
         );
         btnParams.gravity = Gravity.TOP | Gravity.END;
         btnParams.topMargin = dp(48);
-        btnParams.rightMargin = dp(12);
+        btnParams.rightMargin = dp(8);
         container.addView(btnRetour, btnParams);
 
-        // ── Bridge JS → Java ───────────────────────────
         dashboardView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void showGame() {
@@ -68,7 +58,6 @@ public class MainActivity extends Activity {
             }
         }, "NativeApp");
 
-        // ── Scraping toutes les secondes ───────────────
         demarrerScraping();
     }
 
@@ -92,22 +81,19 @@ public class MainActivity extends Activity {
             public void run() {
                 if (gameView != null) {
                     gameView.evaluateJavascript(
-                        "(function() {" +
-                        "  var els = document.querySelectorAll('*');" +
-                        "  var result = '';" +
-                        "  for (var i = 0; i < els.length; i++) {" +
-                        "    var t = (els[i].innerText || '').trim();" +
-                        "    if (/ENVOL/i.test(t) || /FLEW/i.test(t)) {" +
-                        "      var m = t.match(/([0-9]+[.,][0-9]+)\\s*[xX]?/);" +
-                        "      if (m) return m[1].replace(',','.');" +
-                        "    }" +
-                        "  }" +
-                        "  return '';" +
-                        "})()",
+                        "(function(){" +
+                        "var els=document.querySelectorAll('*');" +
+                        "for(var i=0;i<els.length;i++){" +
+                        "var t=(els[i].innerText||'').trim();" +
+                        "if(/ENVOL/i.test(t)||/FLEW/i.test(t)){" +
+                        "var m=t.match(/([0-9]+[.,][0-9]+)/);" +
+                        "if(m)return m[1].replace(',','.');" +
+                        "}}" +
+                        "return '';})();",
                         value -> {
                             if (value != null && !value.equals("\"\"") && !value.equals("null")) {
                                 String cote = value.replace("\"", "").trim();
-                                if (!cote.equals(derniereValeur) && !cote.isEmpty()) {
+                                if (!cote.isEmpty() && !cote.equals(derniereValeur)) {
                                     derniereValeur = cote;
                                     envoyerCote(cote);
                                 }
@@ -128,22 +114,14 @@ public class MainActivity extends Activity {
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
-                String body = "{\"cote\":" + cote + "}";
-                conn.getOutputStream().write(body.getBytes());
-                java.io.BufferedReader br = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(conn.getInputStream())
-                );
+                conn.getOutputStream().write(("{\"cote\":" + cote + "}").getBytes());
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
                 final String response = sb.toString();
                 conn.disconnect();
-                // Mettre à jour le dashboard
-                runOnUiThread(() -> {
-                    dashboardView.evaluateJavascript(
-                        "updateFromNative(" + response + ")", null
-                    );
-                });
+                runOnUiThread(() -> dashboardView.evaluateJavascript("updateFromNative(" + response + ")", null));
             } catch (Exception e) {}
         }).start();
     }
@@ -201,4 +179,3 @@ public class MainActivity extends Activity {
         else super.onBackPressed();
     }
 }
-// fix
