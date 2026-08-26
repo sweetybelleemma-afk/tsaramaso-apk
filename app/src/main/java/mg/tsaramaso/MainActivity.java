@@ -15,7 +15,7 @@ public class MainActivity extends Activity {
     WebView dashboardView;
     WebView gameView;
     FrameLayout container;
-    ImageButton btnRetour;
+    android.widget.Button btnRetour;
     boolean showingGame = false;
     Handler scrapHandler = new Handler();
     String derniereValeur = "";
@@ -39,9 +39,9 @@ public class MainActivity extends Activity {
         container.addView(gameView, matchParent());
 
         // ── Bouton retour flottant ─────────────────────
-        btnRetour = new ImageButton(this);
+        btnRetour = new android.widget.Button(this);
         btnRetour.setText("⬅ Dashboard");
-        ((android.widget.TextView) btnRetour).setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        btnRetour.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.parseColor("#1e40af"));
         bg.setCornerRadius(dp(24));
