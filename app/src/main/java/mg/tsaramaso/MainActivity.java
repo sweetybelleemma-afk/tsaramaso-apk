@@ -1,7 +1,6 @@
 package mg.tsaramaso;
 import android.app.Activity;
 import android.os.Bundle;
-import android.os.Handler;
 import android.webkit.*;
 import android.graphics.Color;
 import android.view.ViewGroup;
@@ -16,8 +15,47 @@ public class MainActivity extends Activity {
     FrameLayout container;
     Button btnRetour;
     boolean showingGame = false;
-    Handler scrapHandler = new Handler();
-    String derniereValeur = "";
+
+    // Script de scraping injecté dans la gameView
+    static final String SCRAPE_SCRIPT =
+        "if (!window._tsaramasoActif) {" +
+        "  window._tsaramasoActif = true;" +
+        "  var _farany = '';" +
+        
+        // ── HUD overlay sur le jeu ──
+        "  var hud = document.createElement('div');" +
+        "  hud.id = 'ts-hud';" +
+        "  hud.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.85);color:#e2e8f0;font-family:sans-serif;font-size:12px;font-weight:700;padding:6px 18px;border-radius:20px;z-index:999999;pointer-events:none;border:1px solid rgba(255,255,255,0.15);';" +
+        "  hud.innerHTML = '<span style=\"color:#f59e0b\">● TSARAMASO IA - Acquisition...</span>';" +
+        "  document.body.appendChild(hud);" +
+        
+        // ── Scraping toutes les secondes ──
+        "  setInterval(function() {" +
+        "    var envoleVal = null;" +
+        "    var allEls = document.querySelectorAll('span, div, td, p');" +
+        "    var colleRegex = /([0-9.,]+x)\\s*ENVOL/i;" +
+        "    var xRegex = /\\b\\d+[.,]?\\d*[xX]\\b/;" +
+        "    for (var i = 0; i < allEls.length; i++) {" +
+        "      var t = (allEls[i].innerText || '').trim();" +
+        "      var m = t.match(colleRegex);" +
+        "      if (m && m[1]) { envoleVal = m[1]; break; }" +
+        "      if (t.toUpperCase().indexOf('ENVOL') >= 0) {" +
+        "        var m2 = t.match(xRegex);" +
+        "        if (m2) { envoleVal = m2[0]; break; }" +
+        "        if (allEls[i-1] && (allEls[i-1].innerText||'').match(xRegex)) {" +
+        "          envoleVal = allEls[i-1].innerText.match(xRegex)[0]; break;" +
+        "        }" +
+        "      }" +
+        "    }" +
+        "    if (!envoleVal) return;" +
+        "    var num = parseFloat(envoleVal.replace(/[xX]/g,'').replace(',','.'));" +
+        "    if (isNaN(num)) return;" +
+        "    var final_ = num.toFixed(2) + 'x';" +
+        "    if (_farany === final_) return;" +
+        "    _farany = final_;" +
+        "    TsaramasoNative.onEnvole(num.toFixed(2));" +
+        "  }, 1000);" +
+        "}";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -25,40 +63,90 @@ public class MainActivity extends Activity {
         container = new FrameLayout(this);
         setContentView(container);
 
+        // ── Dashboard ──
         dashboardView = createWebView();
         dashboardView.loadUrl("file:///android_asset/index.html");
         container.addView(dashboardView, matchParent());
 
+        // ── Jeu ──
         gameView = createWebView();
-        gameView.loadUrl("https://bet261.mg/instant-games/llc/Aviator");
         gameView.setVisibility(android.view.View.GONE);
         container.addView(gameView, matchParent());
 
+        // ── Injection du script après chargement ──
+        gameView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return false; }
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                view.evaluateJavascript(SCRAPE_SCRIPT, null);
+            }
+        });
+
+        // ── Bridge : JS jeu → Java → API → JS dashboard ──
+        gameView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onEnvole(String cote) {
+                new Thread(() -> {
+                    try {
+                        java.net.URL url = new java.net.URL("https://tsaramaso-backend.onrender.com/api/nouveau_tour");
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setRequestProperty("Content-Type", "application/json");
+                        conn.setDoOutput(true);
+                        conn.getOutputStream().write(("{\"cote\":" + cote + "}").getBytes());
+                        java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        final String response = sb.toString();
+                        conn.disconnect();
+                        // Mettre à jour le HUD sur le jeu
+                        runOnUiThread(() -> {
+                            gameView.evaluateJavascript(
+                                "(function(){" +
+                                "  var r=" + response + ";" +
+                                "  var h=document.getElementById('ts-hud');" +
+                                "  if(!h)return;" +
+                                "  var c='#e2e8f0';" +
+                                "  if(r.recommandation&&r.recommandation.indexOf('ENTR')>=0)c='#f59e0b';" +
+                                "  else if(r.recommandation&&r.recommandation.indexOf('VICTOIRE')>=0)c='#22c55e';" +
+                                "  else if(r.recommandation&&r.recommandation.indexOf('CHEC')>=0)c='#ef4444';" +
+                                "  h.innerHTML='<span style=\"opacity:0.6;font-size:10px\">TSARAMASO IA</span> <span style=\"margin:0 6px;opacity:0.3\">|</span><span style=\"color:'+c+'\">'+(r.recommandation||'')+'</span>';" +
+                                "  if(navigator.vibrate){" +
+                                "    if(r.recommandation&&r.recommandation.indexOf('ENTR')>=0)navigator.vibrate([600,200,600]);" +
+                                "    else if(r.recommandation&&r.recommandation.indexOf('VICTOIRE')>=0)navigator.vibrate([150,100,150]);" +
+                                "  }" +
+                                "})()", null
+                            );
+                            // Aussi mettre à jour le dashboard
+                            dashboardView.evaluateJavascript("updateFromNative(" + response + ")", null);
+                        });
+                    } catch (Exception e) {}
+                }).start();
+            }
+        }, "TsaramasoNative");
+
+        gameView.loadUrl("https://bet261.mg/instant-games/llc/Aviator");
+
+        // ── Bouton retour ──
         btnRetour = new Button(this);
         btnRetour.setText("< Dashboard");
         btnRetour.setTextColor(Color.WHITE);
-        btnRetour.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         btnRetour.setBackgroundColor(Color.parseColor("#1e40af"));
         btnRetour.setVisibility(android.view.View.GONE);
         btnRetour.setOnClickListener(v -> afficherDashboard());
+        FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bp.gravity = Gravity.TOP | Gravity.END;
+        bp.topMargin = dp(48); bp.rightMargin = dp(8);
+        container.addView(btnRetour, bp);
 
-        FrameLayout.LayoutParams btnParams = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        btnParams.gravity = Gravity.TOP | Gravity.END;
-        btnParams.topMargin = dp(48);
-        btnParams.rightMargin = dp(8);
-        container.addView(btnRetour, btnParams);
-
+        // ── Bridge dashboard → jeu ──
         dashboardView.addJavascriptInterface(new Object() {
             @JavascriptInterface
-            public void showGame() {
-                runOnUiThread(() -> afficherJeu());
-            }
+            public void showGame() { runOnUiThread(() -> afficherJeu()); }
         }, "NativeApp");
-
-        demarrerScraping();
     }
 
     void afficherJeu() {
@@ -73,57 +161,6 @@ public class MainActivity extends Activity {
         gameView.setVisibility(android.view.View.GONE);
         btnRetour.setVisibility(android.view.View.GONE);
         showingGame = false;
-    }
-
-    void demarrerScraping() {
-        scrapHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (gameView != null) {
-                    gameView.evaluateJavascript(
-                        "(function(){" +
-                        "var els=document.querySelectorAll('*');" +
-                        "for(var i=0;i<els.length;i++){" +
-                        "var t=(els[i].innerText||'').trim();" +
-                        "if(/ENVOL/i.test(t)||/FLEW/i.test(t)){" +
-                        "var m=t.match(/([0-9]+[.,][0-9]+)/);" +
-                        "if(m)return m[1].replace(',','.');" +
-                        "}}" +
-                        "return '';})();",
-                        value -> {
-                            if (value != null && !value.equals("\"\"") && !value.equals("null")) {
-                                String cote = value.replace("\"", "").trim();
-                                if (!cote.isEmpty() && !cote.equals(derniereValeur)) {
-                                    derniereValeur = cote;
-                                    envoyerCote(cote);
-                                }
-                            }
-                        }
-                    );
-                }
-                scrapHandler.postDelayed(this, 1000);
-            }
-        }, 1000);
-    }
-
-    void envoyerCote(String cote) {
-        new Thread(() -> {
-            try {
-                java.net.URL url = new java.net.URL("https://tsaramaso-backend.onrender.com/api/nouveau_tour");
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setDoOutput(true);
-                conn.getOutputStream().write(("{\"cote\":" + cote + "}").getBytes());
-                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = br.readLine()) != null) sb.append(line);
-                final String response = sb.toString();
-                conn.disconnect();
-                runOnUiThread(() -> dashboardView.evaluateJavascript("updateFromNative(" + response + ")", null));
-            } catch (Exception e) {}
-        }).start();
     }
 
     private WebView createWebView() {
@@ -145,31 +182,17 @@ public class MainActivity extends Activity {
         s.setUserAgentString("Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
         wv.setWebChromeClient(new WebChromeClient() {
             @Override
-            public void onPermissionRequest(PermissionRequest request) {
-                request.grant(request.getResources());
-            }
-        });
-        wv.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                return false;
-            }
+            public void onPermissionRequest(PermissionRequest request) { request.grant(request.getResources()); }
         });
         return wv;
     }
 
     private FrameLayout.LayoutParams matchParent() {
-        return new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        );
+        return new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
     private int dp(int val) {
-        return Math.round(TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, val,
-            getResources().getDisplayMetrics()
-        ));
+        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, val, getResources().getDisplayMetrics()));
     }
 
     @Override
