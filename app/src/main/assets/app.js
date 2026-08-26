@@ -1,7 +1,6 @@
 const API = CONFIG.API_BASE_URL;
 let faranyEnvole = "";
 let scrapingInterval = null;
-let iframeChargee = false;
 
 function naviguer(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -9,10 +8,15 @@ function naviguer(page) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('nav-' + page).classList.add('active');
 
-  if (page === 'jeux' && !iframeChargee) {
-    document.getElementById('game-iframe').src = CONFIG.GAME_URL;
-    iframeChargee = true;
-    demarrerScraping();
+  if (page === 'jeux') {
+    // Appel natif Android — affiche la WebView bet261
+    if (window.NativeApp) {
+      window.NativeApp.showGame();
+    }
+  } else {
+    if (window.NativeApp) {
+      window.NativeApp.showDashboard();
+    }
   }
 }
 
@@ -69,62 +73,13 @@ document.getElementById('imageUpload').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-function demarrerScraping() {
-  if (scrapingInterval) return;
-  scrapingInterval = setInterval(() => {
-    try {
-      const iframe = document.getElementById('game-iframe');
-      const doc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (!doc) return;
-      scraperDOM(doc);
-    } catch {}
-  }, CONFIG.SCRAPE_INTERVAL_MS);
-}
-
-function scraperDOM(doc) {
-  const colleRegex = /([0-9.,]+x)\s*ENVOLÉ/i;
-  const xRegex = /\b\d+[\.,]?\d*[xX]\b/;
-  const elements = doc.querySelectorAll('span, div, td, p');
-  let envoleValStr = null;
-  for (let i = 0; i < elements.length; i++) {
-    const text = elements[i].innerText?.trim() || '';
-    const match = text.match(colleRegex);
-    if (match?.[1]) { envoleValStr = match[1]; break; }
-    if (text.toUpperCase().includes('ENVOLÉ')) {
-      const m = text.match(xRegex);
-      if (m) { envoleValStr = m[0]; break; }
-      if (elements[i-1]?.innerText?.match(xRegex)) { envoleValStr = elements[i-1].innerText.match(xRegex)[0]; break; }
-    }
-  }
-  if (!envoleValStr) return;
-  const cote = parseFloat(envoleValStr.replace(/[xX]/g, '').replace(',', '.').trim());
-  if (isNaN(cote)) return;
-  const finalStr = cote.toFixed(2) + 'x';
-  if (faranyEnvole === finalStr) return;
-  faranyEnvole = finalStr;
-  envoyerNouveauTour(cote);
-}
-
-async function envoyerNouveauTour(cote) {
-  try {
-    const r = await fetch(API + '/api/nouveau_tour', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cote })
-    });
-    const d = await r.json();
-    if (d.success) {
-      mettreAJourHistorique(d.multiplicateurs);
-      mettreAJourEtat(d.etat);
-      mettreAJourReco(d.recommandation);
-      vibrer(d.recommandation);
-    }
-  } catch {}
-}
-
 function mettreAJourHistorique(mults) {
   const grid = document.getElementById('historyGrid');
   grid.innerHTML = '';
-  if (!mults.length) { grid.innerHTML = '<div class="empty-state">En attente de données...</div>'; return; }
+  if (!mults.length) {
+    grid.innerHTML = '<div class="empty-state">En attente de données...</div>';
+    return;
+  }
   mults.slice(-40).forEach(mult => {
     const pill = document.createElement('div');
     pill.classList.add('pill');
