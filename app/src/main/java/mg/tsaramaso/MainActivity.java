@@ -15,24 +15,20 @@ public class MainActivity extends Activity {
     FrameLayout container;
     Button btnRetour;
     boolean showingGame = false;
+    static final String API = "https://tsaramaso-backend.onrender.com";
 
-    // Script de scraping injecté dans la gameView
     static final String SCRAPE_SCRIPT =
         "if (!window._tsaramasoActif) {" +
         "  window._tsaramasoActif = true;" +
         "  var _farany = '';" +
-        
-        // ── HUD overlay sur le jeu ──
         "  var hud = document.createElement('div');" +
         "  hud.id = 'ts-hud';" +
-        "  hud.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.85);color:#e2e8f0;font-family:sans-serif;font-size:12px;font-weight:700;padding:6px 18px;border-radius:20px;z-index:999999;pointer-events:none;border:1px solid rgba(255,255,255,0.15);';" +
+        "  hud.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.85);color:#e2e8f0;font-family:sans-serif;font-size:12px;font-weight:700;padding:6px 18px;border-radius:20px;z-index:999999;pointer-events:none;border:1px solid rgba(255,255,255,0.15);white-space:nowrap;';" +
         "  hud.innerHTML = '<span style=\"color:#f59e0b\">● TSARAMASO IA - Acquisition...</span>';" +
         "  document.body.appendChild(hud);" +
-        
-        // ── Scraping toutes les secondes ──
         "  setInterval(function() {" +
+        "    var allEls = document.querySelectorAll('span,div,td,p');" +
         "    var envoleVal = null;" +
-        "    var allEls = document.querySelectorAll('span, div, td, p');" +
         "    var colleRegex = /([0-9.,]+x)\\s*ENVOL/i;" +
         "    var xRegex = /\\b\\d+[.,]?\\d*[xX]\\b/;" +
         "    for (var i = 0; i < allEls.length; i++) {" +
@@ -63,17 +59,14 @@ public class MainActivity extends Activity {
         container = new FrameLayout(this);
         setContentView(container);
 
-        // ── Dashboard ──
         dashboardView = createWebView();
         dashboardView.loadUrl("file:///android_asset/index.html");
         container.addView(dashboardView, matchParent());
 
-        // ── Jeu ──
         gameView = createWebView();
         gameView.setVisibility(android.view.View.GONE);
         container.addView(gameView, matchParent());
 
-        // ── Injection du script après chargement ──
         gameView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return false; }
@@ -83,53 +76,79 @@ public class MainActivity extends Activity {
             }
         });
 
-        // ── Bridge : JS jeu → Java → API → JS dashboard ──
         gameView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onEnvole(String cote) {
+                // Mettre à jour HUD immédiatement
+                runOnUiThread(() -> gameView.evaluateJavascript(
+                    "(function(){var h=document.getElementById('ts-hud');if(h)h.innerHTML='<span style=\"color:#94a3b8;font-size:10px\">TSARAMASO IA</span> <span style=\"margin:0 6px;opacity:0.3\">|</span><span style=\"color:#3b82f6\">⏳ Envoi " + cote + "x...</span>';})()", null
+                ));
                 new Thread(() -> {
                     try {
-                        java.net.URL url = new java.net.URL("https://tsaramaso-backend.onrender.com/api/nouveau_tour");
+                        java.net.URL url = new java.net.URL(API + "/api/nouveau_tour");
                         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                        conn.setConnectTimeout(15000); // 15s pour réveiller Render
+                        conn.setReadTimeout(15000);
                         conn.setRequestMethod("POST");
                         conn.setRequestProperty("Content-Type", "application/json");
                         conn.setDoOutput(true);
                         conn.getOutputStream().write(("{\"cote\":" + cote + "}").getBytes());
-                        java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                        int code = conn.getResponseCode();
+                        java.io.BufferedReader br = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(
+                                code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream()
+                            )
+                        );
                         StringBuilder sb = new StringBuilder();
                         String line;
                         while ((line = br.readLine()) != null) sb.append(line);
                         final String response = sb.toString();
                         conn.disconnect();
-                        // Mettre à jour le HUD sur le jeu
                         runOnUiThread(() -> {
+                            // Mettre à jour HUD jeu
                             gameView.evaluateJavascript(
                                 "(function(){" +
                                 "  var r=" + response + ";" +
                                 "  var h=document.getElementById('ts-hud');" +
                                 "  if(!h)return;" +
-                                "  var c='#e2e8f0';" +
-                                "  if(r.recommandation&&r.recommandation.indexOf('ENTR')>=0)c='#f59e0b';" +
-                                "  else if(r.recommandation&&r.recommandation.indexOf('VICTOIRE')>=0)c='#22c55e';" +
-                                "  else if(r.recommandation&&r.recommandation.indexOf('CHEC')>=0)c='#ef4444';" +
-                                "  h.innerHTML='<span style=\"opacity:0.6;font-size:10px\">TSARAMASO IA</span> <span style=\"margin:0 6px;opacity:0.3\">|</span><span style=\"color:'+c+'\">'+(r.recommandation||'')+'</span>';" +
+                                "  var c='#e2e8f0',txt=r.recommandation||'...';" +
+                                "  if(txt.indexOf('ENTR')>=0)c='#f59e0b';" +
+                                "  else if(txt.indexOf('VICTOIRE')>=0)c='#22c55e';" +
+                                "  else if(txt.indexOf('CHEC')>=0)c='#ef4444';" +
+                                "  else if(txt.indexOf('ACQUI')>=0)c='#3b82f6';" +
+                                "  h.innerHTML='<span style=\"color:#94a3b8;font-size:10px\">TSARAMASO IA</span><span style=\"margin:0 6px;opacity:0.3\">|</span><span style=\"color:'+c+'\">'+txt+'</span>';" +
                                 "  if(navigator.vibrate){" +
-                                "    if(r.recommandation&&r.recommandation.indexOf('ENTR')>=0)navigator.vibrate([600,200,600]);" +
-                                "    else if(r.recommandation&&r.recommandation.indexOf('VICTOIRE')>=0)navigator.vibrate([150,100,150]);" +
+                                "    if(txt.indexOf('ENTR')>=0)navigator.vibrate([600,200,600]);" +
+                                "    else if(txt.indexOf('VICTOIRE')>=0)navigator.vibrate([150,100,150]);" +
                                 "  }" +
                                 "})()", null
                             );
-                            // Aussi mettre à jour le dashboard
+                            // Mettre à jour dashboard
                             dashboardView.evaluateJavascript("updateFromNative(" + response + ")", null);
                         });
-                    } catch (Exception e) {}
+                    } catch (Exception e) {
+                        runOnUiThread(() -> gameView.evaluateJavascript(
+                            "(function(){var h=document.getElementById('ts-hud');if(h)h.innerHTML='<span style=\"color:#ef4444\">● Erreur réseau - Render en veille?</span>';})()", null
+                        ));
+                    }
                 }).start();
             }
         }, "TsaramasoNative");
 
+        // Réveiller Render au démarrage
+        new Thread(() -> {
+            try {
+                java.net.URL url = new java.net.URL(API + "/api/etat");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(30000);
+                conn.getResponseCode();
+                conn.disconnect();
+            } catch (Exception e) {}
+        }).start();
+
         gameView.loadUrl("https://bet261.mg/instant-games/llc/Aviator");
 
-        // ── Bouton retour ──
         btnRetour = new Button(this);
         btnRetour.setText("< Dashboard");
         btnRetour.setTextColor(Color.WHITE);
@@ -139,10 +158,10 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         bp.gravity = Gravity.TOP | Gravity.END;
-        bp.topMargin = dp(48); bp.rightMargin = dp(8);
+        bp.topMargin = dp(48);
+        bp.rightMargin = dp(8);
         container.addView(btnRetour, bp);
 
-        // ── Bridge dashboard → jeu ──
         dashboardView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void showGame() { runOnUiThread(() -> afficherJeu()); }
